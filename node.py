@@ -4,27 +4,34 @@ import numpy as np
 import uuid
 import heapq
 import random
+import re
 
 from packet import Packet
 from collections import defaultdict
 
 class Node:
-    def __init__(self,node_id,address,network_event_scheduler):
+    def __init__(self,node_id,mac_address,network_event_scheduler):
         self.network_event_scheduler = network_event_scheduler
         self.node_id = node_id
-        self.address = address
+        self.mac_address = mac_address
         self.links = []
 
-        label = f'Node {node_id}\n{address}'
+        label = f'Node {node_id}\n{mac_address}'
         self.network_event_scheduler.add_node(node_id,label)
+        if not self.is_valid_mac_address(mac_address):
+            raise ValueError(f"Invalid MAC address: {mac_address}")
 
+    def is_valid_mac_address(self,mac_address):
+        mac_format = re.compile(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$')
+        return bool(mac_format.match(mac_address))
+    
     def add_link(self,link):
         if link not in self.links:
             self.links.append(link)
     
     def send_packet(self,packet):
         self.network_event_scheduler.log_packet_info(packet,"sent",self.node_id)
-        if packet.header['destination'] == self.address:
+        if packet.header['destination_mac'] == self.mac_address:
             self.receive_packet(packet)
         else:
             for link in self.links:
@@ -32,18 +39,19 @@ class Node:
                 link.enqueue_packet(packet,self)
                 break
         
-    def receive_packet(self,packet):
+    def receive_packet(self,packet,receieved_link):
         if packet.arrival_time == -1:
             self.network_event_scheduler.log_packet_info(packet,"lost",self.node_id)
             return
-        if packet.header['destination'] == self.address:
+        if packet.header['destination_mac'] == self.mac_address:
             packet.set_arrived(self.network_event_scheduler.current_time)
             self.network_event_scheduler.log_packet_info(packet,"arrived",self.node_id)
         else:
-            self.network_event_scheduler.log_packet_info(packet,"received",self.node_id)
+            self.network_event_scheduler.log_packet_info(packet,"other destination",self.node_id)
+            pass
 
     def create_packet(self,destination,header_size,payload_size):
-        packet = Packet(self.address,destination,header_size,payload_size,self.network_event_scheduler)
+        packet = Packet(self.mac_address,destination,header_size,payload_size,self.network_event_scheduler)
         self.network_event_scheduler.log_packet_info(packet,"created",self.node_id)
         self.send_packet(packet)
     
@@ -62,4 +70,4 @@ class Node:
     def __str__(self):
         connected_nodes = [link.node_x.node_id if self != link.node_x else link.node_y.node_id for link in self.links]
         connected_nodes_str = ', '.join(map(str,connected_nodes))
-        return f"ノード(ID: {self.node_id}, アドレス: {self.address}, 接続：{connected_nodes_str}"
+        return f"ノード(ID: {self.node_id}, アドレス: {self.mac_address}, 接続：{connected_nodes_str}"

@@ -7,12 +7,13 @@ import random
 from collections import defaultdict
 
 class NetworkEventScheduler:
-    def __init__(self,log_enabled=False,verbose=False):
+    def __init__(self,log_enabled=False,verbose=False,stp_verbose=False):
         self.current_time = 0
         self.events = []
         self.event_id = 0
         self.packet_logs = {}
         self.log_enabled = log_enabled
+        self.stp_verbose = stp_verbose
         self.verbose = verbose
 
         self.graph = nx.Graph()
@@ -41,8 +42,34 @@ class NetworkEventScheduler:
         nx.draw(self.graph,pos,with_labels=False,node_color='lightblue',node_size=2000,width=edge_widths,edge_color=edge_colors)
         nx.draw_networkx_labels(self.graph,pos,labels=nx.get_node_attributes(self.graph,'label'))
         nx.draw_networkx_edge_labels(self.graph,pos,edge_labels=nx.get_edge_attributes(self.graph,'label'))
-        plt.show()
+        plt.savefig("network_topology.png")
+        plt.clf()
 
+    def draw_with_link_states(self,switches):
+        pos = nx.spring_layout(self.graph)
+
+        for u,v in self.graph.edges():
+            link_state = self.get_link_state(u,v,switches)
+            color = 'green' if link_state == "forwarding" else "red"
+            nx.draw_networkx_edges(self.graph,pos,edgelist=[(u,v)], width=2,edge_color=color)
+        
+        for node,data in self.graph.nodes(data=True):
+            if 'Switch' in data['label']:
+                nx.draw_networkx_nodes(self.graph,pos,nodelist=[node],node_color="red",node_shape="s",node_size=250)
+            else:
+                nx.draw_networkx_nodes(self.graph,pos,nodelist=[node],node_color="lightblue",node_shape="o",node_size=250)
+        nx.draw_networkx_edge_labels(self.graph,pos,edge_labels=nx.get_edge_attributes(self.graph,"label"),font_size=8)
+        plt.savefig("network_topology_with_link_states.png")
+        plt.clf()
+    
+    def get_link_state(self,node1_id,node2_id,switches):
+        for switch in switches:
+            if switch.node_id == node1_id or switch.node_id == node2_id:
+                for link in switch.links:
+                    if (link.node_x.node_id == node1_id and link.node_y.node_id == node2_id) or (link.node_x.node_id == node2_id and link.node_y.node_id == node1_id):
+                        return switch.link_states.get(link, "unknown")
+        return "unknown"
+    
     def schedule_event(self,event_time,callback,*args):
         event = (event_time,self.event_id,callback,args)
         heapq.heappush(self.events,event)
@@ -52,8 +79,8 @@ class NetworkEventScheduler:
         if self.log_enabled:
             if packet.id not in self.packet_logs:
                 self.packet_logs[packet.id] = {
-                    "source": packet.header["source"],
-                    "destination": packet.header["destination"],
+                    "source": packet.header["source_mac"],
+                    "destination": packet.header["destination_mac"],
                     "size": packet.size,
                     "create_time": packet.create_time,
                     "arrival_time": packet.arrival_time,
@@ -68,13 +95,13 @@ class NetworkEventScheduler:
                 "event": event_type,
                 "node_id": node_id,
                 "packet_id": packet.id,
-                "src": packet.header["source"],
-                "dst": packet.header["destination"]
+                "src": packet.header["source_mac"],
+                "dst": packet.header["destination_mac"]
             }
             self.packet_logs[packet.id]["events"].append(event_info)
 
             if self.verbose:
-                print(f"{self.current_time} Node:{node_id}, Event: {event_type},Packet:{packet.id},Src:{packet.header['source']},Dst:{packet.header['destination']}")
+                print(f"{self.current_time} Node:{node_id}, Event: {event_type},Packet:{packet.id},Src:{packet.header['source_mac']},Dst:{packet.header['destination_mac']}")
     
     def print_packet_logs(self):
         for packet_id, log in self.packet_logs.items():
@@ -147,19 +174,20 @@ class NetworkEventScheduler:
             times = [min_time + slot * time_slot for slot in time_slots]
             plt.step(times,throughputs,label=f'{src_dst[0]} -> {src_dst[1]}',where = 'post',linestyle="-",alpha=0.5,marker="o")
 
-            plt.xlabel("Time(s)")
-            plt.ylabel("Throghtputs (bps)")
-            plt.title("Throughput over time")
-            plt.xlim(0,max_time)
-            plt.legend()
-            plt.show() 
+        plt.xlabel("Time(s)")
+        plt.ylabel("Throghtputs (bps)")
+        plt.title("Throughput over time")
+        plt.xlim(0,max_time)
+        plt.legend()
+        plt.savefig("throughput_graph.png")
+        plt.clf() 
 
     def generate_delay_histogram(self,packet_logs):
         delay_data = defaultdict(list)
         for packet_id,log in packet_logs.items():
             if log['arrival_time'] is not None:
                 src_dst_pair = (log['source'], log['destination'])
-                delay = log['arrival_time'] - log['creation_time']
+                delay = log['arrival_time'] - log['create_time']
                 delay_data[src_dst_pair].append(delay)
         
         num_plots = len(delay_data)
@@ -170,7 +198,7 @@ class NetworkEventScheduler:
 
         for i,(src_dst,delays) in enumerate(delay_data.items()):
             ax = axs[i] if num_plots > 1 else axs
-            ax.hist(delays, bins=np.arrange(0,max_delay + bin_width,bin_width), alpha=0.5,color="royalblue",label = f'{src_dst[0]} -> {src_dst[1]}')
+            ax.hist(delays, bins=np.arange(0,max_delay + bin_width,bin_width), alpha=0.5,color="royalblue",label = f'{src_dst[0]} -> {src_dst[1]}')
             ax.set_xlabel('Delays(s)')
             ax.set_ylabel('Frequency')
             ax.set_title(f'Delay histgram for {src_dst[0]} -> {src_dst[1]}')
@@ -178,7 +206,8 @@ class NetworkEventScheduler:
             ax.legend()
 
         plt.tight_layout()
-        plt.show()
+        plt.savefig("delay_histogram.png")
+        plt.clf()
 
     def run(self):
         while self.events:

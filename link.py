@@ -40,7 +40,7 @@ class Link:
         
             next_node = self.node_x if from_node != self.node_x else self.node_y
             
-            self.network_event_scheduler.schedule_event(self.network_event_scheduler.current_time + self.delay, next_node.receive_packet, packet)
+            self.network_event_scheduler.schedule_event(self.network_event_scheduler.current_time + self.delay, next_node.receive_packet, packet,self)
             self.network_event_scheduler.schedule_event(dequeue_time + packet_transfer_time, self.subtract_from_queue_time, from_node,packet_transfer_time)
 
             if queue:
